@@ -126,17 +126,17 @@ void print(vector<Server>& servers, string& s) {
     return true;
 }*/
 
-/*int test2(vector<Server>& servers, matrix<int>& t) {
-    int total_bandwidth = 0;
-    for (auto& server: servers) 
-        for (auto r: server.roads)
-            total_bandwidth += r.needs * (r.nodes.size() - 1);
-    for (int i = 0; i < t.rows(); ++i) 
-        for (int j = 0; j < t.cols(); ++j)
-            total_bandwidth += t(i, j);
-    std::cout<<"total bandwidth: " << total_bandwidth << std::endl;
-    return total_bandwidth;
-}*/
+// int test2(vector<Server>& servers, matrix<int>& t) {
+//     int total_bandwidth = 0;
+//     for (auto& server: servers) 
+//         for (auto r: server.roads)
+//             total_bandwidth += r.needs * (r.nodes.size() - 1);
+//     for (int i = 0; i < t.rows(); ++i) 
+//         for (int j = 0; j < t.cols(); ++j)
+//             total_bandwidth += t(i, j);
+//     std::cout<<"total bandwidth: " << total_bandwidth << std::endl;
+//     return total_bandwidth;
+// }
 
 //你要完成的功能总入口
 void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
@@ -150,12 +150,11 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
     ss << string(topo[0]); ss >> nodes_num >> links_num >> servers_num; ss.clear();
     ss << string(topo[2]); ss >> cost_per_server; ss.clear();
     matrix<int> A(nodes_num, nodes_num);    //临接矩阵
-    matrix<int> B(nodes_num, nodes_num);   //二阶临接
     vector<vector<int> > listA(nodes_num);    //A的链表版本
     matrix<double> prA(nodes_num, nodes_num);
     matrix<int> Rest(nodes_num, nodes_num); //带宽剩余
     matrix<int> Cost(nodes_num, nodes_num); //带宽费用
-    //matrix<int> Allbandwidth(nodes_num, nodes_num);//总带宽
+    matrix<int> Allbandwidth(nodes_num, nodes_num);//总带宽
     vector<Server> servers;
     int from, to, rest, cost;
     //读取链路
@@ -163,17 +162,9 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
         ss << string(topo[i + 4]); ss >> from >> to >> rest >> cost; ss.clear();
         A(from, to) = 1; A(to, from) = 1;
         Rest(from, to) = rest; Rest(to, from) = rest;
-        //Allbandwidth(from, to) = rest; Allbandwidth(to, from) = rest;
+        Allbandwidth(from, to) = rest; Allbandwidth(to, from) = rest;
         Cost(from, to) = cost; Cost(to, from) = cost;
         listA[from].push_back(to); listA[to].push_back(from);
-    }
-    for (int i = 0; i < nodes_num; ++i) {
-        for (int j = 0; j < nodes_num; ++j) {
-            for (int k = 0; k < nodes_num; ++k)  
-                {  
-                    B(i,j)+=A(i,k)*A(k,j);  
-                }  
-        }
     }
     //Server一开始放在消费节点附近
     //assert(test(Rest));
@@ -199,8 +190,8 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
     vector<double> pagerank(nodes_num, double(1.0 / nodes_num));
     prA.pageRank(pagerank);
     //Step2
-    const double alpha = nodes_num * 2000; //###调参
-    const double N = nodes_num*0.1; //###调参
+    const double alpha = nodes_num * 500; //###调参
+    const double N = nodes_num*3; //###调参
     vector<std::pair<int, double> > q;
     for (auto& server: servers) {
         q.clear();
@@ -239,8 +230,9 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
         servers.erase(next(servers.begin(), i));
     }
     srand(time(NULL)); 
+    // assert(total_bandwidth==test2(servers, Rest));
     //Step3 合并一阶邻居
-    for (int t = 0; t < 10e7; ++t) { //停止条件自己调整
+    for (int t = 0; t < 10e6; ++t) { //停止条件自己调整
         //随机选取i,j
         // assert(total_bandwidth==test2(servers, Rest));
         int ri = rand() % servers.size();
@@ -249,15 +241,13 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
         auto& sj = servers[rj];
         int pi =  si.position;
         int pj =  sj.position;
-        if (!(A(pi, pj) || (A(pi, pj) == 0 && B(pi, pj) == 1))) continue;
+        if (A(pi, pj) == 0) continue;
         //path,flow
         vector<Road> roads;
         vector<int>  choose;
         int flow = 0; // i->j能够转移的量，最多2跳
-        if (A(pi, pj)) {
-            roads.push_back({{pi, pj}, Rest(pj, pi), Cost(pj, pi)});
-            flow += Rest(pj, pi);
-        }
+        roads.push_back({{pi, pj}, Rest(pj, pi), Cost(pj, pi)});
+        flow += Rest(pj, pi);
         for (auto k: listA[pi]) {
             if (A(k, pj) != 1) continue;
             roads.push_back({{pi, k, pj}, std::min(Rest(pj, k), Rest(k, pi)), Cost(pj, k) + Cost(k, pi)});
@@ -267,7 +257,7 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
         //下面将i转移到j
         //roads按照  排序
         std::sort(roads.begin(), roads.end(), [](const Road& lhs, const Road& rhs)->bool{return lhs.price < rhs.price;});
-        const double beta = nodes_num * 500; // ###调参
+        const double beta = nodes_num * 0.1; // ###调参
         int cost = 0;
         int b = si.needs;
         for (size_t i = 0; i < roads.size(); ++i) {
@@ -292,12 +282,13 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
             servers.erase(next(servers.begin(), ri));
         }
     }
+    //assert(test(Rest));
     string result;
     print(servers, result);
     const char* topo_file = result.c_str();
     // 直接调用输出文件的方法输出到指定文件中(ps请注意格式的正确性，如果有解，第一行只有一个数据；第二行为空；第三行开始才是具体的数据，数据之间用一个空格分隔开)
     write_result(topo_file, filename);
-    /*int totalcost=0;
+    int totalcost=0;
     int Allservers=servers.size();
     for (int j = 0; j < nodes_num; ++j) {
         for (int i = 0; i < nodes_num; ++i) {
@@ -305,6 +296,5 @@ void deploy_server(char * topo[MAX_EDGE_NUM], int line_num, char * filename)
         }
     }
     totalcost+=Allservers*400;
-    std::cout<<totalcost;*/
+    std::cout<<totalcost;
 }
-
